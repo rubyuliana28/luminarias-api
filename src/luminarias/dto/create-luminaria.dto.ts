@@ -1,4 +1,4 @@
-import { IsInt, IsNotEmpty, IsString, Min } from 'class-validator';
+import { IsInt, IsNotEmpty, IsOptional, IsString, Min } from 'class-validator';
 
 export class CreateLuminariaDto {
   @IsString()
@@ -8,4 +8,8 @@ export class CreateLuminariaDto {
   @IsInt()
   @Min(1)
   potencia: number;
+
+  @IsOptional()
+  @IsString()
+  estado?: string;
 }
