@@ -22,3 +22,11 @@ model Luminaria {
 
   @@index([sector])
 }
+
+model Usuario {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  passwordHash String
+  rol          String   @default("operador")
+  creadoEn     DateTime @default(now())
+}
