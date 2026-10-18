@@ -1,7 +1,8 @@
 # luminarias-api
 
-API REST para gestionar luminarias de alumbrado público, construida con NestJS, Prisma y PostgreSQL. Es un proyecto de práctica que voy construyendo por pasos para afianzar mis conocimientos de backend.
 ![CI](https://github.com/rubyuliana28/luminarias-api/actions/workflows/ci.yml/badge.svg)
+
+API REST para gestionar luminarias de alumbrado público, construida con NestJS, Prisma y PostgreSQL. Es un proyecto de práctica que voy construyendo por pasos para afianzar mis conocimientos de backend.
 
 ## Tecnologías
 
@@ -10,12 +11,13 @@ API REST para gestionar luminarias de alumbrado público, construida con NestJS,
 - Prisma ORM 7, con migraciones versionadas
 - class-validator para validar los datos de entrada con DTOs
 - JWT (`@nestjs/jwt`) y bcryptjs para la autenticación
+- Jest para las pruebas unitarias
 - Docker y Docker Compose; GitHub Actions para el CI
 
 ## Requisitos
 
 - Node.js (versión LTS)
-- PostgreSQL en ejecución, con una base de datos llamada `luminarias`
+- PostgreSQL en ejecución, con una base de datos llamada `luminarias` (o Docker, ver más abajo)
 
 ## Variables de entorno
 
@@ -23,6 +25,7 @@ API REST para gestionar luminarias de alumbrado público, construida con NestJS,
 |---|---|
 | `DATABASE_URL` | Dirección de conexión a PostgreSQL |
 | `JWT_SECRET` | Clave con la que se firman los tokens JWT |
+| `POSTGRES_PASSWORD` | Clave de la base de datos del contenedor (solo para Docker Compose) |
 
 Un valor aleatorio para `JWT_SECRET` se puede generar así:
 
@@ -38,7 +41,7 @@ cd luminarias-api
 npm install
 ```
 
-Crea el archivo `.env` a partir del ejemplo y escribe tus datos de PostgreSQL y tu `JWT_SECRET`:
+Crea el archivo `.env` a partir del ejemplo y escribe tus datos:
 
 ```bash
 cp .env.example .env
@@ -55,6 +58,28 @@ npm run start:dev
 ```
 
 La API queda disponible en `http://localhost:3000`.
+
+## Con Docker
+
+```bash
+docker compose up --build
+```
+
+Levanta la API en `http://localhost:3000` y una base PostgreSQL en el puerto 5433 de tu equipo. Las migraciones se aplican al arrancar. Requiere las variables `POSTGRES_PASSWORD` y `JWT_SECRET` en el archivo `.env`.
+
+Para detener todo: `docker compose down`. Los datos se conservan en un volumen; `docker compose down -v` también los borra.
+
+## Pruebas
+
+```bash
+npm test
+```
+
+Pruebas unitarias con Jest. Las dependencias (Prisma y el servicio de JWT) se reemplazan por mocks, así que no necesitan base de datos ni servidor.
+
+## Integración continua
+
+Cada Pull Request y cada push a `main` ejecutan el CI con GitHub Actions: instala las dependencias, genera el cliente de Prisma, corre las pruebas y compila. La imagen de Docker solo se construye si las pruebas pasan.
 
 ## Modelo de datos
 
@@ -125,29 +150,8 @@ Invoke-RestMethod -Method Patch -Uri http://localhost:3000/luminarias/1 -Headers
 - La validación se hace con DTOs y un `ValidationPipe` global: los datos inválidos se rechazan antes de llegar al servicio.
 - Las contraseñas se guardan con hash bcrypt (con salt). El login las compara y nunca las descifra.
 - El guard de autenticación es global y seguro por defecto: solo las rutas marcadas con `@Public()` pasan sin token. Un segundo guard comprueba el rol y responde 403.
-- Las claves viven en el archivo `.env`, que no se sube al repositorio. En el repositorio solo está `.env.example`.
-
-## Pruebas
-
-```bash
-npm test
-```
-
-Pruebas unitarias con Jest. Las dependencias (Prisma y el servicio de JWT) se reemplazan por mocks, así que no necesitan base de datos ni servidor.
-
-## Con Docker
-
-```bash
-docker compose up --build
-```
-
-Levanta la API en `http://localhost:3000` y una base PostgreSQL en el puerto 5433 de tu equipo. Las migraciones se aplican al arrancar. Requiere las variables `POSTGRES_PASSWORD` y `JWT_SECRET` en el archivo `.env`.
-
-Para detener todo: `docker compose down`. Los datos se conservan en un volumen; `docker compose down -v` también los borra.
-
-## Integración continua
-
-Cada Pull Request y cada push a `main` ejecutan el CI con GitHub Actions: instala las dependencias, genera el cliente de Prisma, corre las pruebas, compila y construye la imagen de Docker.
+- Las claves viven en el archivo `.env`, que no se sube al repositorio. En el repositorio solo está `.env.example`, con marcadores.
+- En Docker, las migraciones se aplican al arrancar el contenedor, y los datos viven en un volumen, por lo que sobreviven a los contenedores.
 
 ## Próximos pasos
 
@@ -155,4 +159,5 @@ Cada Pull Request y cada push a `main` ejecutan el CI con GitHub Actions: instal
 - [x] Pruebas unitarias con Jest y mocks
 - [x] Docker y Docker Compose
 - [x] Integración continua (CI) con GitHub Actions
+- [ ] Pruebas de los guards
 - [ ] Despliegue continuo (CD) en la nube
