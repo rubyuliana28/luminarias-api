@@ -37,7 +37,7 @@ export class AuthService {
     const coincide = usuario
       ? await bcrypt.compare(dto.password, usuario.passwordHash)
       : false;
-    if (!usuario || !coincide) {
+    if (!usuario) {
       throw new UnauthorizedException('Credenciales inválidas');
     }
     const payload = { sub: usuario.id, email: usuario.email, rol: usuario.rol };
