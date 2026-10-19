@@ -1,4 +1,5 @@
 import { NotFoundException } from '@nestjs/common';
+import { getQueueToken } from '@nestjs/bullmq';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '../prisma/prisma.service';
 import { LuminariasService } from './luminarias.service';
@@ -18,12 +19,16 @@ describe('LuminariasService', () => {
     },
   };
 
+    // Cola falsa: solo tiene el método que usa el servicio.
+  const colaFalsa = { add: jest.fn() };
+
   beforeEach(async () => {
     jest.resetAllMocks();
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
+        providers: [
         LuminariasService,
         { provide: PrismaService, useValue: prismaFalso },
+        { provide: getQueueToken('inventario'), useValue: colaFalsa },
       ],
     }).compile();
 
@@ -94,5 +99,14 @@ describe('LuminariasService', () => {
 
     expect(prismaFalso.luminaria.create).toHaveBeenCalledWith({ data: dto });
     expect(resultado.id).toBe(1);
+  });
+
+  it('encolarResumenSectores deja el trabajo en la cola y devuelve el jobId', async () => {
+    colaFalsa.add.mockResolvedValue({ id: '7' });
+
+    const resultado = await servicio.encolarResumenSectores();
+
+    expect(colaFalsa.add).toHaveBeenCalledWith('resumen-sectores', {});
+    expect(resultado).toEqual({ jobId: '7' });
   });
 });

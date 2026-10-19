@@ -1,4 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateLuminariaDto } from './dto/create-luminaria.dto';
 import { UpdateLuminariaDto } from './dto/update-luminaria.dto';
@@ -6,7 +8,10 @@ import { ListarLuminariasDto } from './dto/listar-luminarias.dto';
 
 @Injectable()
 export class LuminariasService {
-  constructor(private readonly prisma: PrismaService) {}
+   constructor(
+    private readonly prisma: PrismaService,
+    @InjectQueue('inventario') private readonly colaInventario: Queue,
+  ) {}
 
   create(dto: CreateLuminariaDto) {
     return this.prisma.luminaria.create({ data: dto });
@@ -42,5 +47,10 @@ export class LuminariasService {
   async remove(id: number) {
     await this.findOne(id);
     return this.prisma.luminaria.delete({ where: { id } });
+  }
+
+  async encolarResumenSectores() {
+    const job = await this.colaInventario.add('resumen-sectores', {});
+    return { jobId: job.id };
   }
 }

@@ -23,7 +23,6 @@ export const { ObserveModule, ObserveInstrument } = createObserveModule();
         },
       }),
     }),
-    BullModule.registerQueue({ name: 'inventario' }),
     ObserveModule.forRoot({
       appKey: 'YOUR_APP_KEY',
       appSecret: 'YOUR_APP_SECRET',

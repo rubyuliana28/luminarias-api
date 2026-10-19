@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete,UseGuards, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete,UseGuards, Query, HttpCode, HttpStatus } from '@nestjs/common';
 import { LuminariasService } from './luminarias.service';
 import { CreateLuminariaDto } from './dto/create-luminaria.dto';
 import { UpdateLuminariaDto } from './dto/update-luminaria.dto';
@@ -23,6 +23,13 @@ export class LuminariasController {
     return this.luminariasService.findAll(query);
   }
 
+  @Roles('admin')
+  @Post('resumen-sectores')
+  @HttpCode(HttpStatus.ACCEPTED)
+  resumenSectores() {
+    return this.luminariasService.encolarResumenSectores();
+  }
+  
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.luminariasService.findOne(+id);
