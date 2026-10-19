@@ -81,6 +81,18 @@ Pruebas unitarias con Jest. Las dependencias (Prisma y el servicio de JWT) se re
 
 Cada Pull Request y cada push a `main` ejecutan el CI con GitHub Actions: instala las dependencias, genera el cliente de Prisma, corre las pruebas y compila. La imagen de Docker solo se construye si las pruebas pasan.
 
+## Carga de datos
+
+Un script carga un inventario de luminarias desde un archivo CSV:
+
+```bash
+npm run cargar:inventario -- "ruta/al/archivo.csv"
+```
+
+El CSV debe tener las columnas `codigo`, `direccion`, `sector`, `potencia` y `estado`. La carga se hace por lotes de 1.000 filas dentro de una transacción (o entra todo, o no entra nada), y se puede repetir sin duplicar filas: antes de insertar, borra las luminarias que ya tenían código.
+
+Los datos del inventario no están en este repositorio: el script recibe la ruta del archivo como argumento, y los archivos `.csv` están ignorados por Git.
+
 ## Modelo de datos
 
 **Luminaria**
@@ -88,6 +100,8 @@ Cada Pull Request y cada push a `main` ejecutan el CI con GitHub Actions: instal
 | Campo | Tipo | Detalle |
 |---|---|---|
 | `id` | entero | Se genera solo |
+| `codigo` | texto | Opcional y único (índice único). Identifica cada luminaria del inventario |
+| `direccion` | texto | Opcional |
 | `sector` | texto | Obligatorio. Tiene un índice, porque es la columna por la que se filtra |
 | `potencia` | entero | Obligatorio, mínimo 1 |
 | `estado` | texto | Opcional, por defecto `encendida` |
@@ -110,12 +124,22 @@ Cada Pull Request y cada push a `main` ejecutan el CI con GitHub Actions: instal
 | `POST /auth/register` | Registra un usuario (rol `operador`) | Público | 201, o 409 si el correo ya existe |
 | `POST /auth/login` | Devuelve un token JWT | Público | 200, o 401 si las credenciales son inválidas |
 | `POST /luminarias` | Crea una luminaria | Con token | 201 |
-| `GET /luminarias` | Lista todas las luminarias | Con token | 200 |
+| `GET /luminarias` | Lista luminarias por páginas (`?sector=COMUNA 5&page=1&pageSize=20`) | Con token | 200, o 400 si los parámetros son inválidos |
 | `GET /luminarias/:id` | Devuelve una luminaria | Con token | 200, o 404 si no existe |
 | `PATCH /luminarias/:id` | Cambio parcial de una luminaria | Con token | 200, o 404 si no existe |
 | `DELETE /luminarias/:id` | Borra una luminaria | Solo `admin` | 200, 403 si no es admin, o 404 si no existe |
 
 Si los datos enviados no cumplen las reglas del DTO, la API responde 400 con el detalle del error.
+
+## Paginación
+
+`GET /luminarias` acepta tres parámetros opcionales: `sector` (texto exacto), `page` (desde 1) y `pageSize` (entre 1 y 100, por defecto 20). La respuesta trae los datos y la información de la página:
+
+```json
+{ "data": [], "total": 13216, "page": 1, "pageSize": 20, "totalPages": 661 }
+```
+
+El orden es siempre por `id`, para que las páginas no se repitan ni se salten filas.
 
 ## Autenticación y roles
 
@@ -140,6 +164,9 @@ $token = (Invoke-RestMethod -Method Post -Uri http://localhost:3000/auth/login -
 # Crear una luminaria
 Invoke-RestMethod -Method Post -Uri http://localhost:3000/luminarias -Headers @{ Authorization = "Bearer $token" } -ContentType "application/json" -Body '{"sector":"Norte","potencia":70}'
 
+# Listar la primera página de un sector
+Invoke-RestMethod -Uri "http://localhost:3000/luminarias?sector=COMUNA%205&page=1&pageSize=5" -Headers @{ Authorization = "Bearer $token" }
+
 # Cambio parcial: solo el estado
 Invoke-RestMethod -Method Patch -Uri http://localhost:3000/luminarias/1 -Headers @{ Authorization = "Bearer $token" } -ContentType "application/json" -Body '{"estado":"apagada"}'
 ```
@@ -151,6 +178,8 @@ Invoke-RestMethod -Method Patch -Uri http://localhost:3000/luminarias/1 -Headers
 - Las contraseñas se guardan con hash bcrypt (con salt). El login las compara y nunca las descifra.
 - El guard de autenticación es global y seguro por defecto: solo las rutas marcadas con `@Public()` pasan sin token. Un segundo guard comprueba el rol y responde 403.
 - Las claves viven en el archivo `.env`, que no se sube al repositorio. En el repositorio solo está `.env.example`, con marcadores.
+- Las migraciones que agregan columnas a una tabla con datos las crean como opcionales, para no romper las filas existentes.
+- La carga masiva usa lotes y una transacción, y los datos del inventario nunca entran al repositorio.
 - En Docker, las migraciones se aplican al arrancar el contenedor, y los datos viven en un volumen, por lo que sobreviven a los contenedores.
 
 ## Próximos pasos
@@ -159,5 +188,10 @@ Invoke-RestMethod -Method Patch -Uri http://localhost:3000/luminarias/1 -Headers
 - [x] Pruebas unitarias con Jest y mocks
 - [x] Docker y Docker Compose
 - [x] Integración continua (CI) con GitHub Actions
+- [x] Migración (`codigo`, `direccion`) y carga del inventario por lotes
+- [x] Paginación y filtro por sector
 - [ ] Pruebas de los guards
+- [ ] Tabla de sectores, con migración de datos
+- [ ] Cola con worker para cargas grandes
+- [ ] Frontend sencillo, corriendo en Docker
 - [ ] Despliegue continuo (CD) en la nube

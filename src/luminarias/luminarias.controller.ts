@@ -1,9 +1,10 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete,UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete,UseGuards, Query } from '@nestjs/common';
 import { LuminariasService } from './luminarias.service';
 import { CreateLuminariaDto } from './dto/create-luminaria.dto';
 import { UpdateLuminariaDto } from './dto/update-luminaria.dto';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
+import { ListarLuminariasDto } from './dto/listar-luminarias.dto';
 
 
 
@@ -18,8 +19,8 @@ export class LuminariasController {
   }
 
   @Get()
-  findAll() {
-    return this.luminariasService.findAll();
+  findAll(@Query() query: ListarLuminariasDto) {
+    return this.luminariasService.findAll(query);
   }
 
   @Get(':id')

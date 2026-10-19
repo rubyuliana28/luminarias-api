@@ -7,7 +7,6 @@ describe('LuminariasService', () => {
   let servicio: LuminariasService;
 
   // Prisma falso: solo tiene los métodos que usa el servicio.
-  // jest.fn() crea una función falsa que recuerda cómo la llamaron.
   const prismaFalso = {
     luminaria: {
       create: jest.fn(),
@@ -15,11 +14,12 @@ describe('LuminariasService', () => {
       findUnique: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
+      count: jest.fn(),
     },
   };
 
   beforeEach(async () => {
-    jest.resetAllMocks(); // cada prueba empieza limpia
+    jest.resetAllMocks();
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         LuminariasService,
@@ -34,15 +34,40 @@ describe('LuminariasService', () => {
     expect(servicio).toBeDefined();
   });
 
-  it('findAll devuelve la lista de luminarias', async () => {
-    // Preparar
-    const lista = [{ id: 1, sector: 'Norte', potencia: 70, estado: 'encendida' }];
+  it('findAll devuelve la página pedida con el total', async () => {
+    const lista = [{ id: 1, sector: 'COMUNA 5', potencia: 70, estado: 'encendida' }];
     prismaFalso.luminaria.findMany.mockResolvedValue(lista);
-    // Ejecutar
-    const resultado = await servicio.findAll();
-    // Comprobar
-    expect(resultado).toEqual(lista);
-    expect(prismaFalso.luminaria.findMany).toHaveBeenCalledTimes(1);
+    prismaFalso.luminaria.count.mockResolvedValue(45);
+
+    const resultado = await servicio.findAll({ page: 2, pageSize: 20 });
+
+    expect(resultado).toEqual({
+      data: lista,
+      total: 45,
+      page: 2,
+      pageSize: 20,
+      totalPages: 3,
+    });
+    expect(prismaFalso.luminaria.findMany).toHaveBeenCalledWith({
+      where: {},
+      orderBy: { id: 'asc' },
+      skip: 20,
+      take: 20,
+    });
+  });
+
+  it('findAll filtra por sector y cuenta solo ese sector', async () => {
+    prismaFalso.luminaria.findMany.mockResolvedValue([]);
+    prismaFalso.luminaria.count.mockResolvedValue(0);
+
+    await servicio.findAll({ sector: 'COMUNA 5', page: 1, pageSize: 20 });
+
+    expect(prismaFalso.luminaria.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { sector: 'COMUNA 5' } }),
+    );
+    expect(prismaFalso.luminaria.count).toHaveBeenCalledWith({
+      where: { sector: 'COMUNA 5' },
+    });
   });
 
   it('findOne devuelve la luminaria si existe', async () => {
