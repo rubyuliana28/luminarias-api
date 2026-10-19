@@ -27,12 +27,14 @@ describe('LuminariasController', () => {
     expect(controlador).toBeDefined();
   });
 
-  it('findAll delega en el servicio', async () => {
-    servicioFalso.findAll.mockResolvedValue([]);
+  it('findAll delega en el servicio con los parámetros de la consulta', async () => {
+    const respuesta = { data: [], total: 0, page: 1, pageSize: 20, totalPages: 0 };
+    servicioFalso.findAll.mockResolvedValue(respuesta);
+    const query = { sector: 'COMUNA 5', page: 1, pageSize: 20 };
 
-    const resultado = await controlador.findAll();
+    const resultado = await controlador.findAll(query);
 
-    expect(resultado).toEqual([]);
-    expect(servicioFalso.findAll).toHaveBeenCalledTimes(1);
+    expect(resultado).toEqual(respuesta);
+    expect(servicioFalso.findAll).toHaveBeenCalledWith(query);
   });
 });
