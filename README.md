@@ -190,7 +190,7 @@ Invoke-RestMethod -Method Patch -Uri http://localhost:3000/luminarias/1 -Headers
 - [x] Integración continua (CI) con GitHub Actions
 - [x] Migración (`codigo`, `direccion`) y carga del inventario por lotes
 - [x] Paginación y filtro por sector
-- [ ] Pruebas de los guards
+- [x] Pruebas de los guards
 - [ ] Tabla de sectores, con migración de datos
 - [ ] Cola con worker para cargas grandes
 - [ ] Frontend sencillo, corriendo en Docker
