@@ -53,4 +53,16 @@ export class LuminariasService {
     const job = await this.colaInventario.add('resumen-sectores', {});
     return { jobId: job.id };
   }
+
+  async estadoResumenSectores(jobId: string) {
+    const job = await this.colaInventario.getJob(jobId);
+    if (!job) {
+      throw new NotFoundException(`El trabajo ${jobId} no existe`);
+    }
+    return {
+      jobId: job.id,
+      estado: await job.getState(),
+      resultado: job.returnvalue ?? null,
+    };
+  }
 }

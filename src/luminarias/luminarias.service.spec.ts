@@ -20,7 +20,7 @@ describe('LuminariasService', () => {
   };
 
     // Cola falsa: solo tiene el método que usa el servicio.
-  const colaFalsa = { add: jest.fn() };
+  const colaFalsa = { add: jest.fn(), getJob: jest.fn() };
 
   beforeEach(async () => {
     jest.resetAllMocks();
@@ -108,5 +108,28 @@ describe('LuminariasService', () => {
 
     expect(colaFalsa.add).toHaveBeenCalledWith('resumen-sectores', {});
     expect(resultado).toEqual({ jobId: '7' });
+  });
+
+    it('estadoResumenSectores devuelve el estado y el resultado del trabajo', async () => {
+    const resultado = [{ sector: 'COMUNA 1', luminarias: 976 }];
+    colaFalsa.getJob.mockResolvedValue({
+      id: '4',
+      getState: jest.fn().mockResolvedValue('completed'),
+      returnvalue: resultado,
+    });
+
+    await expect(servicio.estadoResumenSectores('4')).resolves.toEqual({
+      jobId: '4',
+      estado: 'completed',
+      resultado,
+    });
+  });
+
+  it('estadoResumenSectores lanza NotFoundException si el trabajo no existe', async () => {
+    colaFalsa.getJob.mockResolvedValue(undefined);
+
+    await expect(servicio.estadoResumenSectores('99')).rejects.toThrow(
+      NotFoundException,
+    );
   });
 });
