@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete,UseGuards, Query, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query, HttpCode, HttpStatus, ParseIntPipe } from '@nestjs/common';
 import { LuminariasService } from './luminarias.service';
 import { CreateLuminariaDto } from './dto/create-luminaria.dto';
 import { UpdateLuminariaDto } from './dto/update-luminaria.dto';
@@ -41,19 +41,19 @@ export class LuminariasController {
   }
   
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.luminariasService.findOne(+id);
+  findOne(@Param('id', ParseIntPipe) id: number) {
+    return this.luminariasService.findOne(id);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateLuminariaDto: UpdateLuminariaDto) {
-    return this.luminariasService.update(+id, updateLuminariaDto);
+  update(@Param('id', ParseIntPipe) id: number, @Body() updateLuminariaDto: UpdateLuminariaDto) {
+    return this.luminariasService.update(id, updateLuminariaDto);
   }
 
 
   @Roles('admin')
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.luminariasService.remove(+id);
+  remove(@Param('id', ParseIntPipe) id: number) {
+    return this.luminariasService.remove(id);
   }
 }
