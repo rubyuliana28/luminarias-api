@@ -29,6 +29,12 @@ export class LuminariasController {
   resumenSectores() {
     return this.luminariasService.encolarResumenSectores();
   }
+
+  @Roles('admin')
+  @Get('resumen-sectores/:jobId')
+  estadoResumenSectores(@Param('jobId') jobId: string) {
+    return this.luminariasService.estadoResumenSectores(jobId);
+  }
   
   @Get(':id')
   findOne(@Param('id') id: string) {
