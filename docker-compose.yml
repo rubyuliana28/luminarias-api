@@ -13,15 +13,6 @@ services:
       test: ["CMD-SHELL", "pg_isready -U postgres -d luminarias"]
       interval: 5s
       timeout: 5s
-      retries: 10  
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
       retries: 10
   api:
     build: .
@@ -30,11 +21,21 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/luminarias?schema=public
       JWT_SECRET: ${JWT_SECRET}
-      REDIS_HOST: redis
+      AWS_REGION: ${AWS_REGION}
+      SQS_QUEUE_URL: ${SQS_QUEUE_URL}
+      AWS_PROFILE: ${AWS_PROFILE}
+      # Las credenciales no se copian a la imagen: se montan desde tu equipo.
+      # Sirve con `aws login` (login/cache) y con llaves de acceso (credentials).
+      AWS_CONFIG_FILE: /aws/config
+      AWS_SHARED_CREDENTIALS_FILE: /aws/credentials
+      AWS_LOGIN_CACHE_DIRECTORY: /aws/login/cache
+    volumes:
+      # Credenciales en solo lectura; solo la caché del token admite escritura,
+      # porque el SDK guarda ahí el token cuando lo renueva.
+      - ~/.aws:/aws:ro
+      - ~/.aws/login:/aws/login
     depends_on:
       db:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     command: sh -c "npx prisma migrate deploy && exec node dist/main"
 

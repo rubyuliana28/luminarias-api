@@ -1,11 +1,12 @@
 import { NestFactory } from '@nestjs/core';
-import { AppModule, ObserveInstrument } from './app.module';
+import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
-    instrument: ObserveInstrument,
-  });
+  const app = await NestFactory.create(AppModule);
+  // Con esto, al recibir SIGTERM (docker stop) Nest llama a
+  // onApplicationShutdown y el consumidor de SQS se apaga en orden.
+  app.enableShutdownHooks();
 
   app.useGlobalPipes(
     new ValidationPipe({

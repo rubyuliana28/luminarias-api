@@ -1,16 +1,15 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateLuminariaDto } from './dto/create-luminaria.dto';
 import { UpdateLuminariaDto } from './dto/update-luminaria.dto';
 import { ListarLuminariasDto } from './dto/listar-luminarias.dto';
+import { MensajeTrabajo, SqsService } from './sqs.service';
 
 @Injectable()
 export class LuminariasService {
-   constructor(
+  constructor(
     private readonly prisma: PrismaService,
-    @InjectQueue('inventario') private readonly colaInventario: Queue,
+    private readonly sqs: SqsService,
   ) {}
 
   create(dto: CreateLuminariaDto) {
@@ -49,20 +48,80 @@ export class LuminariasService {
     return this.prisma.luminaria.delete({ where: { id } });
   }
 
+  // Primero se guarda el trabajo y luego se envía a la cola: así el
+  // consumidor siempre encuentra la fila cuando le llega el mensaje.
   async encolarResumenSectores() {
-    const job = await this.colaInventario.add('resumen-sectores', {});
-    return { jobId: job.id };
+    const trabajo = await this.prisma.trabajo.create({
+      data: { tipo: 'resumen-sectores' },
+    });
+    try {
+      await this.sqs.enviar({ trabajoId: trabajo.id, tipo: trabajo.tipo });
+    } catch (error) {
+      await this.prisma.trabajo.update({
+        where: { id: trabajo.id },
+        data: { estado: 'fallido', error: 'No se pudo enviar a la cola' },
+      });
+      throw error;
+    }
+    return { trabajoId: trabajo.id };
   }
 
-  async estadoResumenSectores(jobId: string) {
-    const job = await this.colaInventario.getJob(jobId);
-    if (!job) {
-      throw new NotFoundException(`El trabajo ${jobId} no existe`);
+  async estadoResumenSectores(trabajoId: string) {
+    const trabajo = await this.prisma.trabajo.findUnique({
+      where: { id: trabajoId },
+    });
+    if (!trabajo) {
+      throw new NotFoundException(`El trabajo ${trabajoId} no existe`);
     }
     return {
-      jobId: job.id,
-      estado: await job.getState(),
-      resultado: job.returnvalue ?? null,
+      trabajoId: trabajo.id,
+      estado: trabajo.estado,
+      resultado: trabajo.resultado,
+      error: trabajo.error,
     };
+  }
+
+  // Lo llama el consumidor de SQS. Es idempotente: SQS puede entregar el
+  // mismo mensaje más de una vez, y un trabajo completado no se repite.
+  async procesarTrabajo({ trabajoId }: MensajeTrabajo) {
+    const trabajo = await this.prisma.trabajo.findUnique({
+      where: { id: trabajoId },
+    });
+    if (!trabajo) {
+      throw new Error(`El trabajo ${trabajoId} no existe`);
+    }
+    if (trabajo.estado === 'completado') {
+      return;
+    }
+
+    await this.prisma.trabajo.update({
+      where: { id: trabajoId },
+      data: { estado: 'procesando' },
+    });
+    try {
+      if (trabajo.tipo !== 'resumen-sectores') {
+        throw new Error(`Trabajo desconocido: ${trabajo.tipo}`);
+      }
+      const resultado = await this.resumenSectores();
+      await this.prisma.trabajo.update({
+        where: { id: trabajoId },
+        data: { estado: 'completado', resultado, error: null },
+      });
+    } catch (error) {
+      await this.prisma.trabajo.update({
+        where: { id: trabajoId },
+        data: { estado: 'fallido', error: (error as Error).message },
+      });
+      throw error;
+    }
+  }
+
+  async resumenSectores() {
+    const grupos = await this.prisma.luminaria.groupBy({
+      by: ['sector'],
+      _count: { _all: true },
+      orderBy: { sector: 'asc' },
+    });
+    return grupos.map((g) => ({ sector: g.sector, luminarias: g._count._all }));
   }
 }
