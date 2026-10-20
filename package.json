@@ -22,6 +22,7 @@
     "cargar:inventario": "nest build && node dist/carga/cargar-inventario.js"
   },
   "dependencies": {
+    "@aws-sdk/client-sqs": "^3.1153.0",
     "@nestjs/bullmq": "^12.0.0",
     "@nestjs/common": "^12.0.1",
     "@nestjs/config": "^12.0.1",

@@ -5,13 +5,17 @@ import { UpdateLuminariaDto } from './dto/update-luminaria.dto';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { ListarLuminariasDto } from './dto/listar-luminarias.dto';
+import { SqsService } from './sqs.service';
 
 
 
 @UseGuards(RolesGuard)
 @Controller('luminarias')
 export class LuminariasController {
-  constructor(private readonly luminariasService: LuminariasService) {}
+    constructor(
+    private readonly luminariasService: LuminariasService,
+    private readonly sqsService: SqsService,
+  ) {}
 
   @Post()
   create(@Body() createLuminariaDto: CreateLuminariaDto) {
@@ -24,10 +28,10 @@ export class LuminariasController {
   }
 
   @Roles('admin')
-  @Post('resumen-sectores')
+  @Post('resumen-sectores/sqs')
   @HttpCode(HttpStatus.ACCEPTED)
-  resumenSectores() {
-    return this.luminariasService.encolarResumenSectores();
+  resumenSectoresSqs() {
+    return this.sqsService.enviar('resumen-sectores');
   }
 
   @Roles('admin')

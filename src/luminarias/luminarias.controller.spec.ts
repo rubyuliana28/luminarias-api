@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { LuminariasController } from './luminarias.controller';
 import { LuminariasService } from './luminarias.service';
+import { SqsService } from './sqs.service';
 
 describe('LuminariasController', () => {
   let controlador: LuminariasController;
@@ -13,11 +14,17 @@ describe('LuminariasController', () => {
     remove: jest.fn(),
   };
 
+  // SQS falso: solo tiene el método que usa el controlador.
+  const sqsFalso = { enviar: jest.fn() };
+
   beforeEach(async () => {
     jest.resetAllMocks();
     const module: TestingModule = await Test.createTestingModule({
       controllers: [LuminariasController],
-      providers: [{ provide: LuminariasService, useValue: servicioFalso }],
+      providers: [
+        { provide: LuminariasService, useValue: servicioFalso },
+        { provide: SqsService, useValue: sqsFalso },
+      ],
     }).compile();
 
     controlador = module.get<LuminariasController>(LuminariasController);
@@ -36,5 +43,14 @@ describe('LuminariasController', () => {
 
     expect(resultado).toEqual(respuesta);
     expect(servicioFalso.findAll).toHaveBeenCalledWith(query);
+  });
+
+    it('resumenSectoresSqs envía el trabajo a SQS y devuelve el messageId', async () => {
+    sqsFalso.enviar.mockResolvedValue({ messageId: 'abc' });
+
+    const resultado = await controlador.resumenSectoresSqs();
+
+    expect(sqsFalso.enviar).toHaveBeenCalledWith('resumen-sectores');
+    expect(resultado).toEqual({ messageId: 'abc' });
   });
 });
