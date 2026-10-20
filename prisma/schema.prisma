@@ -32,3 +32,15 @@ model Usuario {
   rol          String   @default("operador")
   creadoEn     DateTime @default(now())
 }
+
+// Trabajos que se procesan en segundo plano a través de SQS.
+// SQS no guarda resultados, por eso el estado y el resultado viven aquí.
+model Trabajo {
+  id            String   @id @default(uuid())
+  tipo          String
+  estado        String   @default("pendiente") // pendiente | procesando | completado | fallido
+  resultado     Json?
+  error         String?
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+}

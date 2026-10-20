@@ -12,7 +12,8 @@ API REST para gestionar luminarias de alumbrado público, construida con NestJS,
 - class-validator para validar los datos de entrada con DTOs
 - JWT (`@nestjs/jwt`) y bcryptjs para la autenticación
 - Jest para las pruebas unitarias
-- Docker y Docker Compose; GitHub Actions para el CI
+- Amazon SQS (`@aws-sdk/client-sqs`) para los trabajos en segundo plano
+- Docker y Docker Compose; GitHub Actions para el CI y el CD
 
 ## Requisitos
 
@@ -26,6 +27,9 @@ API REST para gestionar luminarias de alumbrado público, construida con NestJS,
 | `DATABASE_URL` | Dirección de conexión a PostgreSQL |
 | `JWT_SECRET` | Clave con la que se firman los tokens JWT |
 | `POSTGRES_PASSWORD` | Clave de la base de datos del contenedor (solo para Docker Compose) |
+| `AWS_PROFILE` | Perfil de AWS con permisos sobre la cola (en `~/.aws/config`) |
+| `AWS_REGION` | Región de la cola, por ejemplo `us-east-2` |
+| `SQS_QUEUE_URL` | URL de la cola de SQS. Si falta, la API arranca pero el consumidor no |
 
 Un valor aleatorio para `JWT_SECRET` se puede generar así:
 
@@ -65,7 +69,9 @@ La API queda disponible en `http://localhost:3000`.
 docker compose up --build
 ```
 
-Levanta la API en `http://localhost:3000` y una base PostgreSQL en el puerto 5433 de tu equipo. Las migraciones se aplican al arrancar. Requiere las variables `POSTGRES_PASSWORD` y `JWT_SECRET` en el archivo `.env`.
+Levanta la API en `http://localhost:3000` y una base PostgreSQL en el puerto 5433 de tu equipo. Las migraciones se aplican al arrancar. Requiere las variables `POSTGRES_PASSWORD` y `JWT_SECRET` en el archivo `.env`, y las de AWS para la cola.
+
+Las credenciales de AWS no entran a la imagen: la carpeta `~/.aws` de tu equipo se monta en el contenedor. Si usas `aws login`, inicia sesión antes de levantar los contenedores (`aws login --profile luminarias`).
 
 Para detener todo: `docker compose down`. Los datos se conservan en un volumen; `docker compose down -v` también los borra.
 
@@ -117,6 +123,17 @@ Los datos del inventario no están en este repositorio: el script recibe la ruta
 | `rol` | texto | `operador` por defecto, o `admin` |
 | `creadoEn` | fecha | Se asigna al crear |
 
+**Trabajo**
+
+| Campo | Tipo | Detalle |
+|---|---|---|
+| `id` | texto (UUID) | Se genera solo |
+| `tipo` | texto | Qué hay que hacer, por ejemplo `resumen-sectores` |
+| `estado` | texto | `pendiente`, `procesando`, `completado` o `fallido` |
+| `resultado` | JSON | Opcional. Lo guarda el consumidor al terminar |
+| `error` | texto | Opcional. El motivo, si falló |
+| `creadoEn` / `actualizadoEn` | fecha | Se asignan solas |
+
 ## Endpoints
 
 | Verbo y URL | Qué hace | Acceso | Respuesta normal |
@@ -128,8 +145,34 @@ Los datos del inventario no están en este repositorio: el script recibe la ruta
 | `GET /luminarias/:id` | Devuelve una luminaria | Con token | 200, o 404 si no existe |
 | `PATCH /luminarias/:id` | Cambio parcial de una luminaria | Con token | 200, o 404 si no existe |
 | `DELETE /luminarias/:id` | Borra una luminaria | Solo `admin` | 200, 403 si no es admin, o 404 si no existe |
+| `POST /luminarias/resumen-sectores` | Pide el conteo de luminarias por sector, en segundo plano | Solo `admin` | 202 con el `trabajoId` |
+| `GET /luminarias/resumen-sectores/:trabajoId` | Estado y resultado de ese trabajo | Solo `admin` | 200, o 404 si no existe |
 
-Si los datos enviados no cumplen las reglas del DTO, la API responde 400 con el detalle del error.
+Si los datos enviados no cumplen las reglas del DTO, la API responde 400 con el detalle del error. Lo mismo si el `:id` no es un número entero o el `:trabajoId` no es un UUID.
+
+## Cola de trabajos (SQS)
+
+Las tareas pesadas no se hacen dentro de la petición: se dejan en una cola de Amazon SQS y las procesa un consumidor que corre dentro de la misma API.
+
+1. `POST /luminarias/resumen-sectores` guarda una fila en la tabla `Trabajo` (estado `pendiente`), envía a la cola un mensaje con su `trabajoId` y responde **202** de inmediato.
+2. El consumidor lee la cola con *long polling*: cada consulta espera hasta 20 segundos a que llegue algo, en vez de preguntar sin parar a una cola vacía.
+3. Al recibir el mensaje, calcula el resumen, guarda el resultado en la fila (estado `completado`) y **solo entonces** borra el mensaje de la cola.
+4. Si algo falla, el mensaje no se borra: SQS lo vuelve a entregar cuando vence el *visibility timeout*.
+5. `GET /luminarias/resumen-sectores/:trabajoId` consulta la fila para ver el estado y el resultado.
+
+SQS entrega cada mensaje **al menos una vez**, así que el mismo mensaje puede llegar dos veces. Por eso el procesamiento es **idempotente**: si el trabajo ya está `completado`, no se vuelve a calcular y solo se borra el mensaje.
+
+Configuración recomendada en AWS:
+- Una **cola de mensajes fallidos (DLQ)** con `maxReceiveCount` de 3. Así un mensaje que siempre falla deja de reintentarse y queda guardado para revisarlo.
+- Permisos del usuario: `sqs:SendMessage`, `sqs:ReceiveMessage` y `sqs:DeleteMessage` sobre la cola.
+
+```powershell
+# Pedir el resumen (con un token de admin)
+$trabajo = Invoke-RestMethod -Method Post -Uri http://localhost:3000/luminarias/resumen-sectores -Headers @{ Authorization = "Bearer $token" }
+
+# Consultar cómo va
+Invoke-RestMethod -Uri "http://localhost:3000/luminarias/resumen-sectores/$($trabajo.trabajoId)" -Headers @{ Authorization = "Bearer $token" }
+```
 
 ## Paginación
 
@@ -181,6 +224,8 @@ Invoke-RestMethod -Method Patch -Uri http://localhost:3000/luminarias/1 -Headers
 - Las migraciones que agregan columnas a una tabla con datos las crean como opcionales, para no romper las filas existentes.
 - La carga masiva usa lotes y una transacción, y los datos del inventario nunca entran al repositorio.
 - En Docker, las migraciones se aplican al arrancar el contenedor, y los datos viven en un volumen, por lo que sobreviven a los contenedores.
+- SQS no guarda resultados, así que el estado de cada trabajo vive en PostgreSQL. La fila se crea antes de enviar el mensaje, para que el consumidor siempre la encuentre.
+- El consumidor solo borra un mensaje cuando el trabajo terminó bien, y es idempotente porque SQS puede entregar un mensaje más de una vez. Al apagar la app (`docker stop`), deja de escuchar y termina el mensaje que tenga en curso.
 
 ## Próximos pasos
 
@@ -192,6 +237,6 @@ Invoke-RestMethod -Method Patch -Uri http://localhost:3000/luminarias/1 -Headers
 - [x] Paginación y filtro por sector
 - [x] Pruebas de los guards
 - [ ] Tabla de sectores, con migración de datos
-- [ ] Cola con worker para cargas grandes
+- [x] Cola de trabajos con SQS y consumidor idempotente
 - [ ] Frontend sencillo, corriendo en Docker
 - [ ] Despliegue continuo (CD) en la nube

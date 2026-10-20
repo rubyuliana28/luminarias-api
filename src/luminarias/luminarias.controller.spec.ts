@@ -4,7 +4,7 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { LuminariasController } from './luminarias.controller';
 import { LuminariasService } from './luminarias.service';
-import { SqsService } from './sqs.service';
+import { RolesGuard } from '../auth/roles.guard';
 
 describe('LuminariasController', () => {
   let controlador: LuminariasController;
@@ -15,19 +15,15 @@ describe('LuminariasController', () => {
     findOne: jest.fn(),
     update: jest.fn(),
     remove: jest.fn(),
+    encolarResumenSectores: jest.fn(),
+    estadoResumenSectores: jest.fn(),
   };
-
-  // SQS falso: solo tiene el método que usa el controlador.
-  const sqsFalso = { enviar: jest.fn() };
 
   beforeEach(async () => {
     jest.resetAllMocks();
     const module: TestingModule = await Test.createTestingModule({
       controllers: [LuminariasController],
-      providers: [
-        { provide: LuminariasService, useValue: servicioFalso },
-        { provide: SqsService, useValue: sqsFalso },
-      ],
+      providers: [{ provide: LuminariasService, useValue: servicioFalso }],
     }).compile();
 
     controlador = module.get<LuminariasController>(LuminariasController);
@@ -48,13 +44,13 @@ describe('LuminariasController', () => {
     expect(servicioFalso.findAll).toHaveBeenCalledWith(query);
   });
 
-    it('resumenSectoresSqs envía el trabajo a SQS y devuelve el messageId', async () => {
-    sqsFalso.enviar.mockResolvedValue({ messageId: 'abc' });
+  it('resumenSectores encola el trabajo y devuelve el trabajoId', async () => {
+    servicioFalso.encolarResumenSectores.mockResolvedValue({ trabajoId: 'abc' });
 
-    const resultado = await controlador.resumenSectoresSqs();
+    const resultado = await controlador.resumenSectores();
 
-    expect(sqsFalso.enviar).toHaveBeenCalledWith('resumen-sectores');
-    expect(resultado).toEqual({ messageId: 'abc' });
+    expect(servicioFalso.encolarResumenSectores).toHaveBeenCalled();
+    expect(resultado).toEqual({ trabajoId: 'abc' });
   });
 
   // Estas pruebas levantan el controlador como app HTTP para que los pipes de
@@ -63,13 +59,15 @@ describe('LuminariasController', () => {
     let app: INestApplication<App>;
 
     beforeEach(async () => {
+      // Los guards corren antes que los pipes: se deja pasar el de roles para
+      // que estas pruebas lleguen a la validación de los parámetros.
       const module: TestingModule = await Test.createTestingModule({
         controllers: [LuminariasController],
-        providers: [
-          { provide: LuminariasService, useValue: servicioFalso },
-          { provide: SqsService, useValue: sqsFalso },
-        ],
-      }).compile();
+        providers: [{ provide: LuminariasService, useValue: servicioFalso }],
+      })
+        .overrideGuard(RolesGuard)
+        .useValue({ canActivate: () => true })
+        .compile();
       app = module.createNestApplication();
       await app.init();
     });
@@ -99,6 +97,14 @@ describe('LuminariasController', () => {
         .expect(400);
 
       expect(servicioFalso.update).not.toHaveBeenCalled();
+    });
+
+    it('GET /luminarias/resumen-sectores/123 responde 400: el trabajoId debe ser un UUID', async () => {
+      await request(app.getHttpServer())
+        .get('/luminarias/resumen-sectores/123')
+        .expect(400);
+
+      expect(servicioFalso.estadoResumenSectores).not.toHaveBeenCalled();
     });
   });
 });

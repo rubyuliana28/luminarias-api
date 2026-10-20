@@ -1,8 +1,8 @@
 import { NotFoundException } from '@nestjs/common';
-import { getQueueToken } from '@nestjs/bullmq';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '../prisma/prisma.service';
 import { LuminariasService } from './luminarias.service';
+import { SqsService } from './sqs.service';
 
 describe('LuminariasService', () => {
   let servicio: LuminariasService;
@@ -16,19 +16,25 @@ describe('LuminariasService', () => {
       update: jest.fn(),
       delete: jest.fn(),
       count: jest.fn(),
+      groupBy: jest.fn(),
+    },
+    trabajo: {
+      create: jest.fn(),
+      findUnique: jest.fn(),
+      update: jest.fn(),
     },
   };
 
-    // Cola falsa: solo tiene el método que usa el servicio.
-  const colaFalsa = { add: jest.fn(), getJob: jest.fn() };
+  // SQS falso: solo tiene el método que usa el servicio.
+  const sqsFalso = { enviar: jest.fn() };
 
   beforeEach(async () => {
     jest.resetAllMocks();
     const module: TestingModule = await Test.createTestingModule({
-        providers: [
+      providers: [
         LuminariasService,
         { provide: PrismaService, useValue: prismaFalso },
-        { provide: getQueueToken('inventario'), useValue: colaFalsa },
+        { provide: SqsService, useValue: sqsFalso },
       ],
     }).compile();
 
@@ -101,35 +107,140 @@ describe('LuminariasService', () => {
     expect(resultado.id).toBe(1);
   });
 
-  it('encolarResumenSectores deja el trabajo en la cola y devuelve el jobId', async () => {
-    colaFalsa.add.mockResolvedValue({ id: '7' });
+  describe('trabajos con SQS', () => {
+    const resumen = [{ sector: 'COMUNA 1', luminarias: 976 }];
 
-    const resultado = await servicio.encolarResumenSectores();
+    beforeEach(() => {
+      prismaFalso.luminaria.groupBy.mockResolvedValue([
+        { sector: 'COMUNA 1', _count: { _all: 976 } },
+      ]);
+    });
 
-    expect(colaFalsa.add).toHaveBeenCalledWith('resumen-sectores', {});
-    expect(resultado).toEqual({ jobId: '7' });
-  });
+    it('encolarResumenSectores guarda el trabajo, lo envía a SQS y devuelve el trabajoId', async () => {
+      prismaFalso.trabajo.create.mockResolvedValue({ id: 't1', tipo: 'resumen-sectores' });
+
+      const resultado = await servicio.encolarResumenSectores();
+
+      expect(prismaFalso.trabajo.create).toHaveBeenCalledWith({
+        data: { tipo: 'resumen-sectores' },
+      });
+      expect(sqsFalso.enviar).toHaveBeenCalledWith({
+        trabajoId: 't1',
+        tipo: 'resumen-sectores',
+      });
+      expect(resultado).toEqual({ trabajoId: 't1' });
+    });
+
+    it('encolarResumenSectores marca el trabajo como fallido si SQS no responde', async () => {
+      prismaFalso.trabajo.create.mockResolvedValue({ id: 't1', tipo: 'resumen-sectores' });
+      sqsFalso.enviar.mockRejectedValue(new Error('sin conexión'));
+
+      await expect(servicio.encolarResumenSectores()).rejects.toThrow('sin conexión');
+      expect(prismaFalso.trabajo.update).toHaveBeenCalledWith({
+        where: { id: 't1' },
+        data: { estado: 'fallido', error: 'No se pudo enviar a la cola' },
+      });
+    });
 
     it('estadoResumenSectores devuelve el estado y el resultado del trabajo', async () => {
-    const resultado = [{ sector: 'COMUNA 1', luminarias: 976 }];
-    colaFalsa.getJob.mockResolvedValue({
-      id: '4',
-      getState: jest.fn().mockResolvedValue('completed'),
-      returnvalue: resultado,
+      prismaFalso.trabajo.findUnique.mockResolvedValue({
+        id: 't1',
+        estado: 'completado',
+        resultado: resumen,
+        error: null,
+      });
+
+      await expect(servicio.estadoResumenSectores('t1')).resolves.toEqual({
+        trabajoId: 't1',
+        estado: 'completado',
+        resultado: resumen,
+        error: null,
+      });
     });
 
-    await expect(servicio.estadoResumenSectores('4')).resolves.toEqual({
-      jobId: '4',
-      estado: 'completed',
-      resultado,
+    it('estadoResumenSectores lanza NotFoundException si el trabajo no existe', async () => {
+      prismaFalso.trabajo.findUnique.mockResolvedValue(null);
+
+      await expect(servicio.estadoResumenSectores('t99')).rejects.toThrow(
+        NotFoundException,
+      );
     });
-  });
 
-  it('estadoResumenSectores lanza NotFoundException si el trabajo no existe', async () => {
-    colaFalsa.getJob.mockResolvedValue(undefined);
+    it('procesarTrabajo calcula el resumen y deja el trabajo completado', async () => {
+      prismaFalso.trabajo.findUnique.mockResolvedValue({
+        id: 't1',
+        tipo: 'resumen-sectores',
+        estado: 'pendiente',
+      });
 
-    await expect(servicio.estadoResumenSectores('99')).rejects.toThrow(
-      NotFoundException,
-    );
+      await servicio.procesarTrabajo({ trabajoId: 't1', tipo: 'resumen-sectores' });
+
+      expect(prismaFalso.trabajo.update).toHaveBeenLastCalledWith({
+        where: { id: 't1' },
+        data: { estado: 'completado', resultado: resumen, error: null },
+      });
+    });
+
+    it('procesarTrabajo es idempotente: un trabajo completado no se vuelve a calcular', async () => {
+      prismaFalso.trabajo.findUnique.mockResolvedValue({
+        id: 't1',
+        tipo: 'resumen-sectores',
+        estado: 'completado',
+      });
+
+      await servicio.procesarTrabajo({ trabajoId: 't1', tipo: 'resumen-sectores' });
+
+      expect(prismaFalso.luminaria.groupBy).not.toHaveBeenCalled();
+      expect(prismaFalso.trabajo.update).not.toHaveBeenCalled();
+    });
+
+    it('procesarTrabajo reintenta un trabajo que había fallado', async () => {
+      prismaFalso.trabajo.findUnique.mockResolvedValue({
+        id: 't1',
+        tipo: 'resumen-sectores',
+        estado: 'fallido',
+      });
+
+      await servicio.procesarTrabajo({ trabajoId: 't1', tipo: 'resumen-sectores' });
+
+      expect(prismaFalso.luminaria.groupBy).toHaveBeenCalled();
+    });
+
+    it('procesarTrabajo marca fallido y relanza el error si el cálculo falla', async () => {
+      prismaFalso.trabajo.findUnique.mockResolvedValue({
+        id: 't1',
+        tipo: 'resumen-sectores',
+        estado: 'pendiente',
+      });
+      prismaFalso.luminaria.groupBy.mockRejectedValue(new Error('base caída'));
+
+      await expect(
+        servicio.procesarTrabajo({ trabajoId: 't1', tipo: 'resumen-sectores' }),
+      ).rejects.toThrow('base caída');
+      expect(prismaFalso.trabajo.update).toHaveBeenLastCalledWith({
+        where: { id: 't1' },
+        data: { estado: 'fallido', error: 'base caída' },
+      });
+    });
+
+    it('procesarTrabajo rechaza un tipo de trabajo desconocido', async () => {
+      prismaFalso.trabajo.findUnique.mockResolvedValue({
+        id: 't1',
+        tipo: 'otro',
+        estado: 'pendiente',
+      });
+
+      await expect(
+        servicio.procesarTrabajo({ trabajoId: 't1', tipo: 'otro' }),
+      ).rejects.toThrow('Trabajo desconocido: otro');
+    });
+
+    it('procesarTrabajo lanza un error si el trabajo no existe', async () => {
+      prismaFalso.trabajo.findUnique.mockResolvedValue(null);
+
+      await expect(
+        servicio.procesarTrabajo({ trabajoId: 't99', tipo: 'resumen-sectores' }),
+      ).rejects.toThrow('El trabajo t99 no existe');
+    });
   });
 });
